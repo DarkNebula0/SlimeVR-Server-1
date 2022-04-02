@@ -3,6 +3,8 @@ package dev.slimevr.vr.trackers.udp;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 import io.eiren.util.logging.LogManager;
 
@@ -36,37 +38,75 @@ public class UDPProtocolParser {
 	
 	public UDPProtocolParser() {
 	}
-	
-	public UDPPacket parse(ByteBuffer buf, TrackerUDPConnection connection) throws IOException {
-		int packetId = buf.getInt();
-		long packetNumber = buf.getLong();
-		if(connection != null) {
-			if(!connection.isNextPacket(packetNumber)) {
-				// Skip packet because it's not next
-				throw new IOException("Out of order packet received: id " + packetId + ", number " + packetNumber + ", last " + connection.lastPacketNumber + ", from " + connection);
+
+	public List<UDPPacket> parse(ByteBuffer buf, TrackerUDPConnection connection) throws IOException {
+		List<UDPPacket> packets = new ArrayList<>();
+		buf.position(0);
+		int pos = 0;
+
+		while (buf.remaining() >= 7) {
+			int shLength =  buf.remaining();
+			short packetLength = buf.getShort();
+			byte verifier = buf.get();
+			int packetId = buf.getInt();
+
+			if (
+					shLength >= packetLength
+			)
+			{
+				if (verifier == (byte)0xF0) {
+					UDPPacket newPacket = getNewPacket(packetId);
+					if(newPacket != null) {
+						newPacket.readData(buf);
+						packets.add(newPacket);
+					}
+				}
 			}
+
+			pos += packetLength;
+			buf.position(pos);
+		}
+
+		if(connection != null) {
 			connection.lastPacket = System.currentTimeMillis();
 		}
-		UDPPacket newPacket = getNewPacket(packetId);
-		if(newPacket != null) {
-			newPacket.readData(buf);
-		} else {
-			//LogManager.log.debug("[UDPProtocolParser] Skipped packet id " + packetId + " from " + connection);
-		}
-		return newPacket;
+
+		return packets;
 	}
 	
 	public void write(ByteBuffer buf, TrackerUDPConnection connection, UDPPacket packet) throws IOException {
-		buf.putInt(packet.getPacketId());
-		buf.putLong(0); // Packet number is always 0 when sending data to trackers
+		buf.putShort((short)0); // length
+		buf.put((byte) 0xF0); // verifier
+		buf.putInt(packet.getPacketId()); // id
 		packet.writeData(buf);
+		buf.putShort(0, (short)buf.position());
 	}
 	
 	public void writeHandshakeResponse(ByteBuffer buf, TrackerUDPConnection connection) throws IOException {
-		buf.put(HANDSHAKE_BUFFER);
+//		buf.put(HANDSHAKE_BUFFER);
+		buf.putShort((short)0); // length
+		buf.put((byte) 0xF0); // verifier
+		buf.putInt(0x02); // id for handshake
+		buf.putShort(0, (short)buf.position());
+	}
+
+	public void writeHeatbeatResponse(ByteBuffer buf, TrackerUDPConnection connection) throws IOException {
+		buf.putShort((short)0); // length
+		buf.put((byte) 0xF0); // verifier
+		buf.putInt(0x01); // id for handshake
+		buf.putShort(0, (short)buf.position());
+	}
+
+	public void writePingPong(ByteBuffer buf, TrackerUDPConnection connection, int lastId) throws IOException {
+		buf.putShort((short)0); // length
+		buf.put((byte) 0xF0); // verifier
+		buf.putInt(10);
+		buf.putInt(lastId);
 	}
 	
 	public void writeSensorInfoResponse(ByteBuffer buf, TrackerUDPConnection connection, UDPPacket15SensorInfo packet) throws IOException {
+		buf.putShort((short)0); // length
+		buf.put((byte) 0xF0); // verifier
 		buf.putInt(packet.getPacketId());
 		buf.put((byte) packet.sensorId);
 		buf.put((byte) packet.sensorStatus);

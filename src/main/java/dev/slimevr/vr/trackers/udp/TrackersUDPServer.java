@@ -57,7 +57,7 @@ public class TrackersUDPServer extends Thread {
 	private final ArrayList<SocketAddress> broadcastAddresses = new ArrayList<>();
 	private final UDPProtocolParser parser = new UDPProtocolParser();
 	private final byte[] rcvBuffer = new byte[512];
-	private final ByteBuffer bb = ByteBuffer.wrap(rcvBuffer).order(ByteOrder.BIG_ENDIAN);
+	private final ByteBuffer bb = ByteBuffer.wrap(rcvBuffer).order(ByteOrder.LITTLE_ENDIAN);
 	
 	protected DatagramSocket socket = null;
 	protected long lastKeepup = System.currentTimeMillis();
@@ -137,6 +137,7 @@ public class TrackersUDPServer extends Thread {
 				setUpSensor(connection, 0, handshake.imuType, 1);
 			}
 		}
+
 		bb.limit(bb.capacity());
 		bb.rewind();
 		parser.writeHandshakeResponse(bb, connection);
@@ -199,9 +200,11 @@ public class TrackersUDPServer extends Thread {
 					synchronized(connections) {
 						connection = connectionsByAddress.get(received.getAddress());
 					}
-					UDPPacket packet = parser.parse(bb, connection);
-					if(packet != null) {
-						processPacket(received, packet, connection);
+					List<UDPPacket> packets = parser.parse(bb, connection);
+					if(!packets.isEmpty()) {
+						for (UDPPacket packet : packets) {
+							processPacket(received, packet, connection);
+						}
 					}
 				} catch(SocketTimeoutException e) {
 				} catch(Exception e) {
@@ -249,10 +252,12 @@ public class TrackersUDPServer extends Thread {
 								conn.lastPingPacketTime = System.currentTimeMillis();
 								bb.limit(bb.capacity());
 								bb.rewind();
-								bb.putInt(10);
-								bb.putLong(0);
-								bb.putInt(conn.lastPingPacketId);
+								parser.writeHeatbeatResponse(bb, conn);
 								socket.send(new DatagramPacket(rcvBuffer, bb.position(), conn.address));
+//								bb.limit(bb.capacity());
+//								bb.rewind();
+//								parser.writePingPong(bb,conn, conn.lastPingPacketId);
+//								socket.send(new DatagramPacket(rcvBuffer, bb.position(), conn.address));
 							}
 						}
 					}
@@ -267,6 +272,7 @@ public class TrackersUDPServer extends Thread {
 	
 	protected void processPacket(DatagramPacket received, UDPPacket packet, TrackerUDPConnection connection) throws IOException {
 		IMUTracker tracker = null;
+
 		switch(packet.getPacketId()) {
 		case UDPProtocolParser.PACKET_HEARTBEAT:
 			break;
